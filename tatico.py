@@ -1,116 +1,219 @@
-from ply import lex
-from ply import yacc
+import ply.lex as lex
+import ply.yacc as yacc
+
 # -----------------------------------------------------------------------------
-# calc.py
-#
-# A simple calculator with variables.   This is from O'Reilly's
-# "Lex and Yacc", p. 63.
+# 1. ANÁLISE LÉXICA
+# Definição dos tokens que nossa linguagem entende
 # -----------------------------------------------------------------------------
 
 tokens = (
-    'NAME', 'NUMBER',
+    'TIME', 'FORMACAO', 'VALIDAR',
+    'POSICAO',  # GOL, DEF, MEI, ATA
+    'CODIGO_FORMACAO', # Ex: 4-4-2, 4-3-3
+    'NUMERO', 'NOME',
+    'DOIS_PONTOS', 'VIRGULA', 'ABRE_PAR', 'FECHA_PAR'
 )
 
-literals = ['=', '+', '-', '*', '/', '(', ')']
+# Palavras reservadas para não confundir com nomes de jogadores
+reserved = {
+    'TIME': 'TIME',
+    'FORMACAO': 'FORMACAO',
+    'VALIDAR': 'VALIDAR',
+    'GOL': 'POSICAO',
+    'DEF': 'POSICAO',
+    'MEI': 'POSICAO',
+    'ATA': 'POSICAO'
+}
 
-# Tokens
+# Expressões Regulares para tokens simples
+t_DOIS_PONTOS = r':'
+t_VIRGULA = r','
+t_ABRE_PAR = r'\('
+t_FECHA_PAR = r'\)'
 
-t_NAME = r'[a-zA-Z_][a-zA-Z0-9_]*'
+# Ignorar espaços e tabs
+t_ignore = " \t"
 
+# Regex para identificar a formação tática (Ex: 4-4-2)
+def t_CODIGO_FORMACAO(t):
+    r'\d+-\d+-\d+'
+    return t
 
-def t_NUMBER(t):
+# Regex para nomes (jogadores ou time)
+def t_NOME(t):
+    r'[a-zA-Z_][a-zA-Z0-9_]*'
+    # Verifica se é uma palavra reservada (TIME, GOL, etc.)
+    t.type = reserved.get(t.value, 'NOME') 
+    return t
+
+# Regex para números (camisa)
+def t_NUMERO(t):
     r'\d+'
     t.value = int(t.value)
     return t
-
-t_ignore = " \t"
 
 def t_newline(t):
     r'\n+'
     t.lexer.lineno += t.value.count("\n")
 
 def t_error(t):
-    print("Illegal character '%s'" % t.value[0])
+    print(f"Caractere ilegal '{t.value[0]}'")
     t.lexer.skip(1)
 
-# Build the lexer
-import ply.lex as lex
+# Constrói o lexer
 lexer = lex.lex()
 
-# Parsing rules
+# -----------------------------------------------------------------------------
+# 2. ESTRUTURA DE DADOS (MEMÓRIA SEMÂNTICA)
+# Onde guardamos o estado do time enquanto lemos o arquivo
+# -----------------------------------------------------------------------------
 
-precedence = (
-    ('left', '+', '-'),
-    ('left', '*', '/'),
-    ('right', 'UMINUS'),
-)
+dados_time = {
+    'nome': None,
+    'formacao': None, # Vai guardar [4, 4, 2]
+    'elenco': {'GOL': [], 'DEF': [], 'MEI': [], 'ATA': []},
+    'camisas_usadas': []
+}
 
-# dictionary of names
-names = {}
+def limpar_dados():
+    dados_time['nome'] = None
+    dados_time['formacao'] = None
+    dados_time['elenco'] = {'GOL': [], 'DEF': [], 'MEI': [], 'ATA': []}
+    dados_time['camisas_usadas'] = []
 
-def p_statement_assign(p):
-    'statement : NAME "=" expression'
-    names[p[1]] = p[3]
+# -----------------------------------------------------------------------------
+# 3. ANÁLISE SINTÁTICA E SEMÂNTICA
+# Regras gramaticais e ações de validação
+# -----------------------------------------------------------------------------
 
+def p_statement_list(p):
+    '''statement : statement command
+                 | command'''
+    pass
 
-def p_statement_expr(p):
-    'statement : expression'
-    print(p[1])
+# Comando 1: Definir Nome do Time
+def p_command_time(p):
+    'command : TIME NOME'
+    dados_time['nome'] = p[2]
+    print(f"-> Time definido: {p[2]}")
 
+# Comando 2: Definir Formação (Ação Semântica: Parsear a string "4-4-2")
+def p_command_formacao(p):
+    'command : FORMACAO CODIGO_FORMACAO'
+    # Transforma "4-4-2" em uma lista de inteiros [4, 4, 2]
+    partes = p[2].split('-') 
+    dados_time['formacao'] = [int(x) for x in partes] 
+    print(f"-> Formação definida: {p[2]}")
 
-def p_expression_binop(p):
-    '''expression : expression '+' expression
-                  | expression '-' expression
-                  | expression '*' expression
-                  | expression '/' expression'''
-    if p[2] == '+':
-        p[0] = p[1] + p[3]
-    elif p[2] == '-':
-        p[0] = p[1] - p[3]
-    elif p[2] == '*':
-        p[0] = p[1] * p[3]
-    elif p[2] == '/':
-        p[0] = p[1] / p[3]
+# Comando 3: Lista de Jogadores por Posição
+def p_command_posicao(p):
+    'command : POSICAO DOIS_PONTOS lista_jogadores'
+    posicao = p[1] # Ex: DEF
+    lista = p[3]   # Lista retornada por p_lista_jogadores
+    
+    # Ação Semântica: Guardar na estrutura
+    dados_time['elenco'][posicao].extend(lista)
+    
+    # Ação Semântica: Registrar números de camisa para checar duplicidade depois
+    for num, nome in lista:
+        dados_time['camisas_usadas'].append(num)
 
+# Regra Auxiliar: Lista Recursiva de Jogadores
+# Ex: 1 (Rossi), 2 (Varela)
+def p_lista_jogadores(p):
+    '''lista_jogadores : jogador
+                       | jogador VIRGULA lista_jogadores'''
+    if len(p) == 2:
+        p[0] = [p[1]] # Retorna lista com 1 jogador
+    else:
+        p[0] = [p[1]] + p[3] # Concatena jogador atual com o resto da lista
 
-def p_expression_uminus(p):
-    "expression : '-' expression %prec UMINUS"
-    p[0] = -p[2]
+# Regra Auxiliar: Estrutura de um único jogador
+# Ex: 1 (Rossi)
+def p_jogador(p):
+    'jogador : NUMERO ABRE_PAR NOME FECHA_PAR'
+    p[0] = (p[1], p[3]) # Retorna tupla (Numero, Nome)
 
+# Comando 4: VALIDAR (Aqui acontece a mágica Semântica pedida no trabalho)
+def p_command_validar(p):
+    'command : VALIDAR'
+    print("\n--- INICIANDO VALIDAÇÃO SEMÂNTICA ---")
+    
+    erros = []
+    
+    # 1. Validação: Existe formação definida?
+    fmt = dados_time['formacao']
+    if not fmt:
+        print("ERRO FATAL: Formação não definida.")
+        return
 
-def p_expression_group(p):
-    "expression : '(' expression ')'"
-    p[0] = p[2]
+    # 2. Validação: Contagem por setor vs Formação (Ex: 4-4-2)
+    # fmt[0] = defensores, fmt[1] = meias, fmt[2] = atacantes
+    qtd_def = len(dados_time['elenco']['DEF'])
+    qtd_mei = len(dados_time['elenco']['MEI'])
+    qtd_ata = len(dados_time['elenco']['ATA'])
+    qtd_gol = len(dados_time['elenco']['GOL'])
 
+    if qtd_gol != 1:
+        erros.append(f"Erro: O time deve ter exatamente 1 goleiro. Encontrado: {qtd_gol}")
 
-def p_expression_number(p):
-    "expression : NUMBER"
-    p[0] = p[1]
+    if qtd_def != fmt[0]:
+        erros.append(f"Erro Tático: Formação pede {fmt[0]} defensores, mas foram escalados {qtd_def}.")
 
+    if qtd_mei != fmt[1]:
+        erros.append(f"Erro Tático: Formação pede {fmt[1]} meias, mas foram escalados {qtd_mei}.")
+        
+    if qtd_ata != fmt[2]:
+        erros.append(f"Erro Tático: Formação pede {fmt[2]} atacantes, mas foram escalados {qtd_ata}.")
 
-def p_expression_name(p):
-    "expression : NAME"
-    try:
-        p[0] = names[p[1]]
-    except LookupError:
-        print("Undefined name '%s'" % p[1])
-        p[0] = 0
+    # 3. Validação: Total de Jogadores
+    total = qtd_gol + qtd_def + qtd_mei + qtd_ata
+    if total != 11:
+        erros.append(f"Erro Regulamento: O time tem {total} jogadores. É necessário ter exatamente 11.")
 
+    # 4. Validação: Camisas Duplicadas
+    camisas = dados_time['camisas_usadas']
+    if len(camisas) != len(set(camisas)):
+        from collections import Counter
+        duplicadas = [item for item, count in Counter(camisas).items() if count > 1]
+        erros.append(f"Erro Numeração: Existem camisas duplicadas no time: {duplicadas}")
+
+    # Resultado Final
+    if not erros:
+        print(f"SUCESSO! O time {dados_time['nome']} está escalado corretamente no esquema {fmt}.")
+        [print(f"  {pos}: {len(lst)} jogadores") for pos, lst in dados_time['elenco'].items()]
+    else:
+        print("FALHA NA VALIDAÇÃO:")
+        for e in erros:
+            print(f"  [X] {e}")
+    
+    # Limpa para o próximo input
+    limpar_dados()
 
 def p_error(p):
     if p:
-        print("Syntax error at '%s'" % p.value)
+        print(f"Erro de sintaxe no token '{p.value}'")
     else:
-        print("Syntax error at EOF")
+        print("Erro de sintaxe no final do arquivo")
 
-import ply.yacc as yacc
+# Build the parser
 parser = yacc.yacc()
 
+# -----------------------------------------------------------------------------
+# EXECUÇÃO INTERATIVA
+# -----------------------------------------------------------------------------
+print("Analista Tático v1.0 (Digite as linhas do time e termine com VALIDAR)")
+print("Exemplo:\nTIME Fla\nFORMACAO 4-4-2\nGOL: 1(Rossi)\nDEF: 2(Varela), 3(Leo)\nVALIDAR\n")
+
+buffer_texto = ""
 while True:
     try:
-        s = input('calc > ')
+        s = input('tatica > ')
     except EOFError:
         break
-    if not s:
-        continue
-    yacc.parse(s)
+    if not s: continue
+    
+    # Acumula as linhas até encontrar "VALIDAR" para processar o bloco (opcional, 
+    # mas facilita colar o texto inteiro) ou processa linha a linha se a gramática permitir.
+    # Como nossa gramática aceita 'statement command', podemos passar linha a linha.
+    parser.parse(s)
