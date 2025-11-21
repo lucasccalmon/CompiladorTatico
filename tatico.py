@@ -36,7 +36,7 @@ t_ignore = " \t"
 
 # Regex para identificar a formação tática (Ex: 4-4-2)
 def t_CODIGO_FORMACAO(t):
-    r'\d+-\d+-\d+'
+    r'\d-\d-\d(-\d)?'
     return t
 
 # Regex para nomes (jogadores ou time)
@@ -164,18 +164,28 @@ def p_command_validar(p):
     qtd_ata = len(dados_time['elenco']['ATA'])
     qtd_gol = len(dados_time['elenco']['GOL'])
 
-    if qtd_gol != 1:
-        erros.append(f"Erro: O time deve ter exatamente 1 goleiro. Encontrado: {qtd_gol}")
-
+# Lógica flexível para 3 ou 4 números
+    # fmt é a lista, ex: [4, 4, 2] ou [4, 2, 3, 1]
+    
+    # DEFESA: Sempre o primeiro número
     if qtd_def != fmt[0]:
-        erros.append(f"Erro Tático: Formação pede {fmt[0]} defensores, mas foram escalados {qtd_def}.")
+        erros.append(f"Erro Tático (DEF): Formação pede {fmt[0]}, escalados {qtd_def}.")
 
-    if qtd_mei != fmt[1]:
-        erros.append(f"Erro Tático: Formação pede {fmt[1]} meias, mas foram escalados {qtd_mei}.")
-        
-    if qtd_ata != fmt[2]:
-        erros.append(f"Erro Tático: Formação pede {fmt[2]} atacantes, mas foram escalados {qtd_ata}.")
+    # ATAQUE: Sempre o último número
+    if qtd_ata != fmt[-1]: # -1 pega o último elemento da lista
+        erros.append(f"Erro Tático (ATA): Formação pede {fmt[-1]}, escalados {qtd_ata}.")
 
+    # MEIO-CAMPO: Soma de tudo que está entre o primeiro e o último
+    # Se for 4-4-2: meio é [4] -> soma 4
+    # Se for 4-2-3-1: meio é [2, 3] -> soma 5
+    meios_necessarios = sum(fmt[1:-1]) 
+    
+    if qtd_mei != meios_necessarios:
+        if len(fmt) == 4:
+            detalhe = f"({fmt[1]}+{fmt[2]})"
+        else:
+            detalhe = ""
+        erros.append(f"Erro Tático (MEI): Formação pede {meios_necessarios} {detalhe}, escalados {qtd_mei}.")
     # 3. Validação: Total de Jogadores
     total = qtd_gol + qtd_def + qtd_mei + qtd_ata
     if total != 11:
