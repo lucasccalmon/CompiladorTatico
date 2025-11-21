@@ -11,7 +11,8 @@ tokens = (
     'POSICAO',  # GOL, DEF, MEI, ATA
     'CODIGO_FORMACAO', # Ex: 4-4-2, 4-3-3
     'NUMERO', 'NOME',
-    'DOIS_PONTOS', 'VIRGULA', 'ABRE_PAR', 'FECHA_PAR'
+    'DOIS_PONTOS', 'VIRGULA', 'ABRE_PAR', 'FECHA_PAR',
+    'PONTO_VIRGULA'
 )
 
 # Palavras reservadas para não confundir com nomes de jogadores
@@ -28,6 +29,7 @@ reserved = {
 # Expressões Regulares para tokens simples
 t_DOIS_PONTOS = r':'
 t_VIRGULA = r','
+t_PONTO_VIRGULA = r';'
 t_ABRE_PAR = r'\('
 t_FECHA_PAR = r'\)'
 
@@ -68,18 +70,25 @@ lexer = lex.lex()
 # Onde guardamos o estado do time enquanto lemos o arquivo
 # -----------------------------------------------------------------------------
 
-dados_time = {
-    'nome': None,
-    'formacao': None, # Vai guardar [4, 4, 2]
-    'elenco': {'GOL': [], 'DEF': [], 'MEI': [], 'ATA': []},
-    'camisas_usadas': []
+# Função auxiliar para criar um time vazio
+def novo_time_struct():
+    return {
+        'ativo': False, # Flag para saber se este time está sendo usado
+        'nome': None,
+        'formacao': None,
+        'elenco': {'GOL': [], 'DEF': [], 'MEI': [], 'ATA': []},
+        'camisas_usadas': []
+    }
+
+# Memória Global
+match_data = {
+    'casa': novo_time_struct(),
+    'fora': novo_time_struct()
 }
 
 def limpar_dados():
-    dados_time['nome'] = None
-    dados_time['formacao'] = None
-    dados_time['elenco'] = {'GOL': [], 'DEF': [], 'MEI': [], 'ATA': []}
-    dados_time['camisas_usadas'] = []
+    match_data['casa'] = novo_time_struct()
+    match_data['fora'] = novo_time_struct()
 
 # -----------------------------------------------------------------------------
 # 3. ANÁLISE SINTÁTICA E SEMÂNTICA
@@ -102,31 +111,55 @@ def p_nome_composto_recursivo(p):
     p[0] = f"{p[1]} {p[2]}"
 
 # Comando 1: Definir Nome do Time
-def p_command_time(p):
+def p_command_time_simples(p):
     'command : TIME nome_composto'
-    dados_time['nome'] = p[2]
+    match_data['casa']['nome'] = p[2]
+    match_data['casa']['ativo'] = True
+    # Garante que o "fora" está desligado
+    match_data['fora']['ativo'] = False 
     print(f"-> Time definido: {p[2]}")
 
+def p_command_time_duplo(p):
+    'command : TIME nome_composto PONTO_VIRGULA nome_composto'
+    match_data['casa']['nome'] = p[2]
+    match_data['casa']['ativo'] = True
+    match_data['fora']['nome'] = p[4]
+    match_data['fora']['ativo'] = True
+    print(f"-> Confronto definido: {p[2]} (Casa) vs {p[4]} (Fora)")
+
 # Comando 2: Definir Formação (Ação Semântica: Parsear a string "4-4-2")
-def p_command_formacao(p):
+def p_command_formacao_simples(p):
     'command : FORMACAO CODIGO_FORMACAO'
-    # Transforma "4-4-2" em uma lista de inteiros [4, 4, 2]
-    partes = p[2].split('-') 
-    dados_time['formacao'] = [int(x) for x in partes] 
-    print(f"-> Formação definida: {p[2]}")
+    partes = p[2].split('-')
+    match_data['casa']['formacao'] = [int(x) for x in partes]
+    print(f"-> Tática: {p[2]}")
+    
+def p_command_formacao_duplo(p):
+    'command : FORMACAO CODIGO_FORMACAO PONTO_VIRGULA CODIGO_FORMACAO'
+    # Casa
+    partes_casa = p[2].split('-')
+    match_data['casa']['formacao'] = [int(x) for x in partes_casa]
+    # Fora
+    partes_fora = p[4].split('-')
+    match_data['fora']['formacao'] = [int(x) for x in partes_fora]
+    print(f"-> Táticas: {p[2]} vs {p[4]}")
+
+
+def processar_lista(lista, time_key, posicao):
+    if not lista: return
+    match_data[time_key]['elenco'][posicao].extend(lista)
+    for num, nome in lista:
+        match_data[time_key]['camisas_usadas'].append(num)
 
 # Comando 3: Lista de Jogadores por Posição
-def p_command_posicao(p):
+def p_command_posicao_simples(p):
     'command : POSICAO DOIS_PONTOS lista_jogadores'
-    posicao = p[1] # Ex: DEF
-    lista = p[3]   # Lista retornada por p_lista_jogadores
-    
-    # Ação Semântica: Guardar na estrutura
-    dados_time['elenco'][posicao].extend(lista)
-    
-    # Ação Semântica: Registrar números de camisa para checar duplicidade depois
-    for num, nome in lista:
-        dados_time['camisas_usadas'].append(num)
+    processar_lista(p[3], 'casa', p[1])
+
+def p_command_posicao_duplo(p):
+    'command : POSICAO DOIS_PONTOS lista_jogadores PONTO_VIRGULA lista_jogadores'
+    processar_lista(p[3], 'casa', p[1])
+    processar_lista(p[5], 'fora', p[1])
 
 # Regra Auxiliar: Lista Recursiva de Jogadores
 # Ex: 1 (Rossi), 2 (Varela)
@@ -145,69 +178,61 @@ def p_jogador(p):
     p[0] = (p[1], p[3]) # Retorna tupla (Numero, Nome)
 
 # Comando 4: VALIDAR (Aqui acontece a mágica Semântica pedida no trabalho)
+def validar_time(dados, label):
+    # Se o time não estiver marcado como ativo, ignoramos (não é erro)
+    if not dados['ativo']: 
+        return True 
+        
+    print(f"\n--- Validando {label}: {dados['nome']} ---")
+    erros = []
+    fmt = dados['formacao']
+    
+    if not fmt:
+        print(f"ERRO: Formação não definida para {label}.")
+        return False
+
+    qtd_def = len(dados['elenco']['DEF'])
+    qtd_mei = len(dados['elenco']['MEI'])
+    qtd_ata = len(dados['elenco']['ATA'])
+    qtd_gol = len(dados['elenco']['GOL'])
+    
+    meios_necessarios = sum(fmt[1:-1])
+
+    if qtd_gol != 1: erros.append(f"Goleiros: Esperado 1, achou {qtd_gol}")
+    if qtd_def != fmt[0]: erros.append(f"Defesa: Esperado {fmt[0]}, achou {qtd_def}")
+    if qtd_mei != meios_necessarios: erros.append(f"Meio: Esperado {meios_necessarios}, achou {qtd_mei}")
+    if qtd_ata != fmt[-1]: erros.append(f"Ataque: Esperado {fmt[-1]}, achou {qtd_ata}")
+
+    total = qtd_gol + qtd_def + qtd_mei + qtd_ata
+    if total != 11: erros.append(f"Total: Time tem {total} jogadores (precisa de 11)")
+
+    camisas = dados['camisas_usadas']
+    if len(camisas) != len(set(camisas)):
+        erros.append("Numeração duplicada detectada")
+
+    if not erros:
+        print("-> OK! Time válido.")
+        return True
+    else:
+        for e in erros: print(f"-> [X] {e}")
+        return False
+
 def p_command_validar(p):
     'command : VALIDAR'
-    print("\n--- INICIANDO VALIDAÇÃO SEMÂNTICA ---")
+    # Valida Casa (Sempre)
+    ok_casa = validar_time(match_data['casa'], "Time Casa")
     
-    erros = []
+    # Valida Fora (Só se estiver ativo)
+    ok_fora = True
+    if match_data['fora']['ativo']:
+        ok_fora = validar_time(match_data['fora'], "Time Visitante")
     
-    # 1. Validação: Existe formação definida?
-    fmt = dados_time['formacao']
-    if not fmt:
-        print("ERRO FATAL: Formação não definida.")
-        return
-
-    # 2. Validação: Contagem por setor vs Formação (Ex: 4-4-2)
-    # fmt[0] = defensores, fmt[1] = meias, fmt[2] = atacantes
-    qtd_def = len(dados_time['elenco']['DEF'])
-    qtd_mei = len(dados_time['elenco']['MEI'])
-    qtd_ata = len(dados_time['elenco']['ATA'])
-    qtd_gol = len(dados_time['elenco']['GOL'])
-
-# Lógica flexível para 3 ou 4 números
-    # fmt é a lista, ex: [4, 4, 2] ou [4, 2, 3, 1]
-    
-    # DEFESA: Sempre o primeiro número
-    if qtd_def != fmt[0]:
-        erros.append(f"Erro Tático (DEF): Formação pede {fmt[0]}, escalados {qtd_def}.")
-
-    # ATAQUE: Sempre o último número
-    if qtd_ata != fmt[-1]: # -1 pega o último elemento da lista
-        erros.append(f"Erro Tático (ATA): Formação pede {fmt[-1]}, escalados {qtd_ata}.")
-
-    # MEIO-CAMPO: Soma de tudo que está entre o primeiro e o último
-    # Se for 4-4-2: meio é [4] -> soma 4
-    # Se for 4-2-3-1: meio é [2, 3] -> soma 5
-    meios_necessarios = sum(fmt[1:-1]) 
-    
-    if qtd_mei != meios_necessarios:
-        if len(fmt) == 4:
-            detalhe = f"({fmt[1]}+{fmt[2]})"
-        else:
-            detalhe = ""
-        erros.append(f"Erro Tático (MEI): Formação pede {meios_necessarios} {detalhe}, escalados {qtd_mei}.")
-    # 3. Validação: Total de Jogadores
-    total = qtd_gol + qtd_def + qtd_mei + qtd_ata
-    if total != 11:
-        erros.append(f"Erro Regulamento: O time tem {total} jogadores. É necessário ter exatamente 11.")
-
-    # 4. Validação: Camisas Duplicadas
-    camisas = dados_time['camisas_usadas']
-    if len(camisas) != len(set(camisas)):
-        from collections import Counter
-        duplicadas = [item for item, count in Counter(camisas).items() if count > 1]
-        erros.append(f"Erro Numeração: Existem camisas duplicadas no time: {duplicadas}")
-
-    # Resultado Final
-    if not erros:
-        print(f"SUCESSO! O time {dados_time['nome']} está escalado corretamente no esquema {fmt}.")
-        [print(f"  {pos}: {len(lst)} jogadores") for pos, lst in dados_time['elenco'].items()]
+    if ok_casa and ok_fora:
+        msg = "PARTIDA CONFIRMADA" if match_data['fora']['ativo'] else "TIME CONFIRMADO"
+        print(f"\n>> {msg} <<")
     else:
-        print("FALHA NA VALIDAÇÃO:")
-        for e in erros:
-            print(f"  [X] {e}")
+        print("\n>> ERRO NA VALIDAÇÃO <<")
     
-    # Limpa para o próximo input
     limpar_dados()
 
 def p_error(p):
