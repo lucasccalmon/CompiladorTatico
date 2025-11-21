@@ -41,7 +41,7 @@ def t_CODIGO_FORMACAO(t):
 
 # Regex para nomes (jogadores ou time)
 def t_NOME(t):
-    r'[a-zA-Z_][a-zA-Z0-9_]*'
+    r'[a-zA-Z_\u00C0-\u00FF][a-zA-Z0-9_\-\u00C0-\u00FF]*'
     # Verifica se é uma palavra reservada (TIME, GOL, etc.)
     t.type = reserved.get(t.value, 'NOME') 
     return t
@@ -86,14 +86,24 @@ def limpar_dados():
 # Regras gramaticais e ações de validação
 # -----------------------------------------------------------------------------
 
+
 def p_statement_list(p):
     '''statement : statement command
                  | command'''
     pass
 
+def p_nome_composto_simples(p):
+    'nome_composto : NOME'
+    p[0] = p[1]
+
+def p_nome_composto_recursivo(p):
+    'nome_composto : nome_composto NOME'
+    # Pega o nome acumulado (p[1]) e junta com o novo (p[2]) usando espaço
+    p[0] = f"{p[1]} {p[2]}"
+
 # Comando 1: Definir Nome do Time
 def p_command_time(p):
-    'command : TIME NOME'
+    'command : TIME nome_composto'
     dados_time['nome'] = p[2]
     print(f"-> Time definido: {p[2]}")
 
@@ -131,7 +141,7 @@ def p_lista_jogadores(p):
 # Regra Auxiliar: Estrutura de um único jogador
 # Ex: 1 (Rossi)
 def p_jogador(p):
-    'jogador : NUMERO ABRE_PAR NOME FECHA_PAR'
+    'jogador : NUMERO ABRE_PAR nome_composto FECHA_PAR'
     p[0] = (p[1], p[3]) # Retorna tupla (Numero, Nome)
 
 # Comando 4: VALIDAR (Aqui acontece a mágica Semântica pedida no trabalho)
