@@ -1,5 +1,6 @@
 import ply.lex as lex
 import ply.yacc as yacc
+import json
 
 # -----------------------------------------------------------------------------
 # 1. ANÁLISE LÉXICA
@@ -219,19 +220,51 @@ def validar_time(dados, label):
 
 def p_command_validar(p):
     'command : VALIDAR'
-    # Valida Casa (Sempre)
-    ok_casa = validar_time(match_data['casa'], "Time Casa")
     
-    # Valida Fora (Só se estiver ativo)
+    # --- ETAPA 1: VALIDAÇÃO (O que você já tinha) ---
+    erros = []
+    
+    # Valida Casa
+    # Suponha que as variáveis ok_casa e ok_fora já foram calculadas usando sua lógica anterior
+    ok_casa = validar_time(match_data['casa'], "Casa")
+    
     ok_fora = True
     if match_data['fora']['ativo']:
-        ok_fora = validar_time(match_data['fora'], "Time Visitante")
+        ok_fora = validar_time(match_data['fora'], "Fora")
     
+    # --- ETAPA 2: GERAÇÃO DE CÓDIGO (A TRADUÇÃO) ---
+    # Se não houver erros, nós TRADUZIMOS a entrada para JSON
     if ok_casa and ok_fora:
-        msg = "PARTIDA CONFIRMADA" if match_data['fora']['ativo'] else "TIME CONFIRMADO"
-        print(f"\n>> {msg} <<")
+        print("\n--- INÍCIO DA TRADUÇÃO (OUTPUT) ---\n")
+        
+        # Montamos o objeto final de saída (A estrutura transformada)
+        saida_compilada = {
+            "match_event": {
+                "home_team": {
+                    "name": match_data['casa']['nome'],
+                    "formation_scheme": "-".join(map(str, match_data['casa']['formacao'])),
+                    "squad": match_data['casa']['elenco']
+                }
+            }
+        }
+
+        # Se tiver time de fora, adiciona ao JSON
+        if match_data['fora']['ativo']:
+            saida_compilada["match_event"]["away_team"] = {
+                "name": match_data['fora']['nome'],
+                "formation_scheme": "-".join(map(str, match_data['fora']['formacao'])),
+                "squad": match_data['fora']['elenco']
+            }
+
+        # Imprime o JSON formatado
+        # Isso é equivalente a gerar o código de montagem ou resultado final
+        json_output = json.dumps(saida_compilada, indent=4, ensure_ascii=False)
+        print(json_output)
+        
+        print("\n--- FIM DA TRADUÇÃO ---")
+        
     else:
-        print("\n>> ERRO NA VALIDAÇÃO <<")
+        print("ERRO DE COMPILAÇÃO: As regras semânticas foram violadas.")
     
     limpar_dados()
 
