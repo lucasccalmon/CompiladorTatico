@@ -1,6 +1,7 @@
 import ply.lex as lex
 import ply.yacc as yacc
 import json
+import sys
 
 # -----------------------------------------------------------------------------
 # 1. ANÁLISE LÉXICA
@@ -8,7 +9,7 @@ import json
 # -----------------------------------------------------------------------------
 
 tokens = (
-    'TIME', 'FORMACAO', 'VALIDAR',
+    'TIME', 'FORMACAO', 'VALIDAR', 'STOP',
     'POSICAO',  # GOL, DEF, MEI, ATA
     'CODIGO_FORMACAO', # Ex: 4-4-2, 4-3-3
     'NUMERO', 'NOME',
@@ -21,6 +22,7 @@ reserved = {
     'TIME': 'TIME',
     'FORMACAO': 'FORMACAO',
     'VALIDAR': 'VALIDAR',
+    'STOP':'STOP',
     'GOL': 'POSICAO',
     'DEF': 'POSICAO',
     'MEI': 'POSICAO',
@@ -101,6 +103,12 @@ def p_statement_list(p):
     '''statement : statement command
                  | command'''
     pass
+
+# --- NOVA REGRA DO STOP ---
+def p_command_stop(p):
+    'command : STOP'
+    print("\nEncerrando Analisador Tático... Até logo!")
+    sys.exit() # Encerra o script Python
 
 def p_nome_composto_simples(p):
     'nome_composto : NOME'
